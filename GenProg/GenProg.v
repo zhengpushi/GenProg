@@ -1130,15 +1130,15 @@ Fixpoint CGacc {d:data} (a:acc d) (eta:env) (ps:paths) {struct a}
 
 
 (** comm转字符串 *)
-Fixpoint CGcomm (c:comm) (eta:env) (ps:paths) {struct c} : string :=
+Fixpoint CGcomm (c:comm) (eta:env) {struct c} : string :=
   match c with
   | c_debug n => "debug(" ++ nat2str n ++ ")"
   | c_skip => "/* skip */"
-  | c_seq c1 c2 => (CGcomm c1 eta ps) ++ strNewline ++ (CGcomm c2 eta ps)
+  | c_seq c1 c2 => (CGcomm c1 eta) ++ strNewline ++ (CGcomm c2 eta)
   | @c_new d f =>
       let x := env_new eta d in
       let s1 := data2strDecl d NO(x) in
-      let s2 := CGcomm (f (a_var ID(x)) (e_var ID(x))) &x ps in
+      let s2 := CGcomm (f (a_var ID(x)) (e_var ID(x))) &x in
       "{" ++ strNewline ++ s1 ++ ";" ++ strNewline ++ s2 ++ strNewline ++ "}"
   | c_asgn a e =>
       (* CGacc a eta ps ++ " = " ++ CGexp e eta ps ++ ";" *)
@@ -1148,7 +1148,7 @@ Fixpoint CGcomm (c:comm) (eta:env) (ps:paths) {struct c} : string :=
       let si := data2str (didx n) NO(i) in
       let sn := dim2str n in
       (* let ps := paths_add ps (p_idx NO(i)) in *)
-      let s1 := CGcomm (f (e_var $i)) &i ps in
+      let s1 := CGcomm (f (e_var $i)) &i in
       (* "&" ++ env2str &i ++ "|" ++ nat2str $i ++ "&" ++ *)
       "for (int " ++ si ++ " = 0; " ++ si ++ " < " ++ sn ++ "; " ++
         si ++ " += 1) {" ++ strNewline ++ s1 ++ strNewline ++ "}"
@@ -1156,7 +1156,7 @@ Fixpoint CGcomm (c:comm) (eta:env) (ps:paths) {struct c} : string :=
       let  i := env_new eta (didx n) in
       let si := data2str (didx n) NO(i) in
       let sn := dim2str n in
-      let s1 := CGcomm (f (e_var $i) (a_idx a $i)) &i ps in
+      let s1 := CGcomm (f (e_var $i) (a_idx a $i)) &i in
       "#pragma omp parallel for" ++ strNewline ++
         "for (int " ++ si ++ " = 0; " ++ si ++ " < " ++ sn ++ "; " ++
         si ++ " += 1) {" ++ strNewline ++ s1 ++ strNewline ++ "}"
@@ -1168,7 +1168,7 @@ Fixpoint CGcomm (c:comm) (eta:env) (ps:paths) {struct c} : string :=
 (** 几个简洁的函数名 *)
 Definition CG0 {d} (a:acc d) (e:exp d) : comm := Atrans a e.
 Definition CG1 {d} (a:acc d) (e:exp d) : comm := HItrans (CG0 a e).
-Definition CG  {d} (a:acc d) (e:exp d) (eta:env) : string := CGcomm (CG1 a e) eta [].
+Definition CG  {d} (a:acc d) (e:exp d) (eta:env) : string := CGcomm (CG1 a e) eta.
 
 
 (** * Properties of above operations *)
