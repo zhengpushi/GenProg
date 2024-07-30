@@ -1,2 +1,2 @@
 # GenProg
-Generate program from Coq
+Generate program from Coq to C

@@ -1157,7 +1157,7 @@ Fixpoint CGcomm (c:comm) (eta:env) {struct c} : string :=
       let si := data2str (didx n) NO(i) in
       let sn := dim2str n in
       let s1 := CGcomm (f (e_var $i) (a_idx a $i)) &i in
-      "#pragma omp parallel for" ++ strNewline ++
+      (* "#pragma omp parallel for" ++ strNewline ++ *)
         "for (int " ++ si ++ " = 0; " ++ si ++ " < " ++ sn ++ "; " ++
         si ++ " += 1) {" ++ strNewline ++ s1 ++ strNewline ++ "}"
   | c_mapI f e a => "err_CGcomm_mapI"
@@ -1325,49 +1325,83 @@ Section Vcmul.
 End Vcmul.
 
 Section Vadd.
-  Definition Vadd {n} (e1 e2:exp (dary n dnum)) : exp (dary n dnum) :=
-    e_map (fun x => (e_fst x) + (e_snd x)) (e_zip e1 e2).
+  Definition Vadd {n} (v0 v1 : exp (dary n dnum)) : exp (dary n dnum) :=
+    e_map (fun x => (e_fst x) + (e_snd x)) (e_zip v0 v1).
 
-  (* Vadd is commutative: ϕ(v1+v2) = ϕ(v2+v1)
-     给定AST形式的两个表达式v1,v2，验证 v1+v2 和 v2+v1 的语义相等 *)
-  Lemma Vadd_comm : forall n (v1 v2:exp (dary n dnum)),
-      exp_semeq2 (Vadd v1 v2) (Vadd v2 v1) [].
+  (* Vadd is commutative: ϕ(v0+v1) = ϕ(v1+v0)
+     给定AST形式的两个表达式v0,v1，验证 v0+v1 和 v1+v0 的语义相等 *)
+  Lemma Vadd_comm : forall n (v0 v1 : exp (dary n dnum)),
+      exp_semeq2 (Vadd v0 v1) (Vadd v1 v0) [].
   Proof. intros. apply veq_iff_vnth; intros. cbn. ring. Qed.
   
-  (* Vadd's semantics: ϕ(v1+v2) = ϕ(v1) + ϕ(v2)
-     给定AST形式的两个表达式v1,v2，验证 v1+v2 的语义等于“v1的语义与v2的语义之和” *)
-  Lemma Vadd_sem : forall n (v1 v2:exp (dary n dnum)) (eta:env),
-      exp_semeq1 (Vadd v1 v2) eta
-        (vadd (Aadd:=Rplus) (eeval v1 eta) (eeval v2 eta)).
+  (* Vadd's semantics: ϕ(v0+v1) = ϕ(v0) + ϕ(v1)
+     给定AST形式的两个表达式v0,v1，验证 v0+v1 的语义等于“v0的语义与v1的语义之和” *)
+  Lemma Vadd_sem : forall n (v0 v1 : exp (dary n dnum)) (eta:env),
+      exp_semeq1 (Vadd v0 v1) eta
+        (vadd (Aadd:=Rplus) (eeval v0 eta) (eeval v1 eta)).
   Proof. intros. apply veq_iff_vnth; intros; cbn. rewrite vnth_vadd. ring. Qed.
 
-  Definition Vadd_CG (n:nat) :=
-    let dn : dim := dstr n "n" in
-    let i1 := env_new empty_env (didx dn) in
-    let v1 := env_new &i1 (dary dn dnum) in
+  (* 不使用 exp_semeq1 函数，更直接的语义验证 *)
+  Notation vadd := (vadd (Aadd:=Rplus)).
+  Lemma Vadd_sem' : forall n (v0 v1 : exp (dary n dnum)) (eta : env),
+      eeval(Vadd v0 v1) eta = vadd (eeval v0 eta) (eeval v1 eta).
+  Proof. intros. apply veq_iff_vnth; intros; cbn. rewrite vnth_vadd. ring. Qed.
+
+  (* 上面的证明很简单，检查为什么会这样？ *)
+  Section check_Vadd_sem'.
+    Variable n : nat.
+    Variable v0 v1 : exp (dary n dnum).
+    Variable eta : env.
+    (* 可以看到，因为eeval函数是可计算的，它几乎被展开成了右面的形式。 *)
+    Eval cbn in eeval (Vadd v0 v1) eta.
+    (* = vmake (fun i : 'I_n => (eeval v0 eta i + eeval v1 eta i)%R) *)
+    
+  End check_Vadd_sem'.
+
+  (* Vadd的原始定义 *)
+  Definition Vadd_CG : string :=
+    let dn : dim := dstr 0 "n" in
+    let v0 := env_new empty_env (dary dn dnum) in
+    let v1 := env_new &v0 (dary dn dnum) in
     let v2 := env_new &v1 (dary dn dnum) in
-    let v3 := env_new &v2 (dary dn dnum) in
-    (* let e := Vadd (n:=dn) $v1 $v2 in *)
-    let e := Vadd (n:=dn) (Vadd (n:=dn) $v1 $v2) $v2 in
-    (* CG0 $v3 e. *)
-    CG $v3 e &v3.
-  (* Eval cbn in Vadd_CG 3. *)
-  Compute Vadd_CG 3.
+    let e := Vadd (n:=dn) $v0 $v1 in
+    CG $v2 e &v2.
+  Compute Vadd_CG.
+
+  (* 修改dn为常数的版本 *)
+  Definition Vadd_CG' : string :=
+    let dn : dim := dcnst 5 in
+    let v0 := env_new empty_env (dary dn dnum) in
+    let v1 := env_new &v0 (dary dn dnum) in
+    let v2 := env_new &v1 (dary dn dnum) in
+    let e := Vadd (n:=dn) $v0 $v1 in
+    CG $v2 e &v2.
+  Compute Vadd_CG'.
+
+  (* v2 = (v0 + v1) + v1 的版本 *)
+  Definition Vadd_CG'' : string :=
+    let dn : dim := dstr 0 "n" in
+    let v0 := env_new empty_env (dary dn dnum) in
+    let v1 := env_new &v0 (dary dn dnum) in
+    let v2 := env_new &v1 (dary dn dnum) in
+    let e := Vadd (n:=dn) (Vadd (n:=dn) $v0 $v1) $v1 in
+    CG $v2 e &v2.
+  Compute Vadd_CG''.
 End Vadd.
 
 Section Vsub.
-  Definition Vsub {n} (e1 e2:exp (dary n dnum)) : exp (dary n dnum) :=
-    e_map (fun x => (e_fst x) - (e_snd x)) (e_zip e1 e2).
+  Definition Vsub {n} (v0 v1 : exp (dary n dnum)) : exp (dary n dnum) :=
+    e_map (fun x => (e_fst x) - (e_snd x)) (e_zip v0 v1).
 
-  Definition Vsub_CG (n:nat) :=
-    let dn : dim := dstr n "n" in
-    let i1 := env_new empty_env (didx dn) in
-    let v1 := env_new &i1 (dary dn dnum) in
+  Definition Vsub_CG : string :=
+    let dn : dim := dstr 0 "n" in
+    let i0 := env_new empty_env (didx dn) in
+    let v0 := env_new &i0 (dary dn dnum) in
+    let v1 := env_new &v0 (dary dn dnum) in
     let v2 := env_new &v1 (dary dn dnum) in
-    let v3 := env_new &v2 (dary dn dnum) in
-    let e := Vsub (n:=dn) $v1 $v2 in
-    CG $v3 e &v3.
-  Compute Vsub_CG 3.
+    let e := Vsub (n:=dn) $v0 $v1 in
+    CG $v2 e &v2.
+  Compute Vsub_CG.
 End Vsub.
 
 Section Vsum.
@@ -1406,34 +1440,22 @@ Section Vsum.
 End Vsum.
 
 Section Vdot.
-  Definition Vdot {n} (e1 e2:exp (dary n dnum)) : exp dnum :=
+  Definition Vdot {n} (v0 v1 : exp (dary n dnum)) : exp dnum :=
     e_reduce (e_op2 Rop2_add)
-      (e_map (fun x => (e_fst x) * (e_snd x)) (e_zip e1 e2))
+      (e_map (fun x => (e_fst x) * (e_snd x)) (e_zip v0 v1))
       e_cnst0.
 
-  Definition Vdot_CG (n:nat) :=
-    let dn : dim := dstr n "n" in
-    let eta := empty_env in
-    (* let v1 := env_new eta (dary dn dnum) in *)
-    let i0 := env_new eta (didx dn) in
-    let i1 := env_new &i0 (didx dn) in
-    let v1 := env_new &i1 (dary dn dnum) in
-    let v2 := env_new &v1 (dary dn dnum) in
-    let x0 := env_new &v2 dnum in
-    (* (CG1 $x0 (Vdot (n:=dn) $v1 $v2), &x0). *)
-    (* (CG $x0 (Vdot (n:=dn) $v1 $v2) &x0, &x0). *)
-    (* (CG $x0 (Vdot (n:=dn) $v1 $v2) &x0, &x0, CG1 $x0 (Vdot (n:=dn) $v1 $v2)). *)
-    (CG $x0 (Vdot (n:=dn) $v1 $v2) &x0).
-
-  Section test.
-    Variable n : nat.
-    (* Set Printing Implicit. *)
-    (* Set Printing Coercions. *)
-    Eval cbv in Vdot_CG n.
+  Definition Vdot_CG : string :=
+    let dn : dim := dstr 0 "n" in
+    let v0 := env_new empty_env (dary dn dnum) in
+    let v1 := env_new &v0 (dary dn dnum) in
+    let x0 := env_new &v1 dnum in
+    CG $x0 (Vdot (n:=dn) $v0 $v1) &x0.
+  
+  Eval cbv in Vdot_CG.
   (* 
   {
 	float v2[n];
-&pragma omp parallel for
 	for (int i2 = 0; i2 < n; i2 += 1) {
 	  v2[i2] = v0[i2] * v1[i2];
 	}
@@ -1447,7 +1469,20 @@ Section Vdot.
 	}
   }
    *)
-  End test.
+  
+  Definition Vdot_CG' : string :=
+    let dn : dim := dstr 0 "n" in
+    let eta := empty_env in
+    (* let v1 := env_new eta (dary dn dnum) in *)
+    let i0 := env_new eta (didx dn) in
+    let i1 := env_new &i0 (didx dn) in
+    let v1 := env_new &i1 (dary dn dnum) in
+    let v2 := env_new &v1 (dary dn dnum) in
+    let x0 := env_new &v2 dnum in
+    (* (CG1 $x0 (Vdot (n:=dn) $v1 $v2), &x0). *)
+    (* (CG $x0 (Vdot (n:=dn) $v1 $v2) &x0, &x0). *)
+    (* (CG $x0 (Vdot (n:=dn) $v1 $v2) &x0, &x0, CG1 $x0 (Vdot (n:=dn) $v1 $v2)). *)
+    (CG $x0 (Vdot (n:=dn) $v1 $v2) &x0).
 
   (* Definition Vdot2_CG (n:nat) := *)
   (*   let dr : dim := dstr r "r" in *)
@@ -1492,45 +1527,27 @@ Section Mcmul.
 End Mcmul.
 
 Section Madd.
-  Definition Madd {r c} (m1 m2:exp (dmat r c dnum)) : exp (dmat r c dnum) :=
-    e_map (fun x => Vadd (e_fst x) (e_snd x)) (e_zip m1 m2).
+  Definition Madd {r c} (m0 m1 : exp (dmat r c dnum)) : exp (dmat r c dnum) :=
+    e_map (fun x => Vadd (e_fst x) (e_snd x)) (e_zip m0 m1).
 
-  Definition Madd_CG (r c:nat) :=
+  Definition Madd_CG (r c : nat) : string :=
     let dim_r : dim := dstr r "r" in
     let dim_c : dim := dstr c "c" in
-    let m1 := env_new empty_env (dmat r c dnum) in
+    let m0 := env_new empty_env (dmat r c dnum) in
+    let m1 := env_new &m0 (dmat r c dnum) in
     let m2 := env_new &m1 (dmat r c dnum) in
-    let m3 := env_new &m2 (dmat r c dnum) in
-    (* CG0 $m3 (Madd (r:=dim_r) (c:=dim_c) $m1 $m2) *)
-    (* CG $m3 (Madd (r:=dim_r) (c:=dim_c) $m1 $m2) &m3 *)
-    (* CG0 $m3 (Madd (r:=dim_r) (c:=dim_c) (Madd (r:=dim_r) (c:=dim_c) $m1 $m2) $m2) *)
-    (CG $m3 (Madd (r:=dim_r) (c:=dim_c) (Madd (r:=dim_r) (c:=dim_c) $m1 $m2) $m2) &m3)
-  .
+    CG $m2 (Madd (r:=dim_r) (c:=dim_c) $m0 $m1) &m2.
   
-  Section test.
-    Compute Madd_CG.
+  Compute Madd_CG.
   (* 
-  {
-	float m3[r][c];
-#pragma omp parallel for
-	for (int i0 = 0; i0 < r; i0 += 1) {
-#pragma omp parallel for
-	  for (int i1 = 0; i1 < c; i1 += 1) {
-		m3[i0][i1] = (m0[i0][i1] + m1[i0][i1]);
-	  }
-	}
-#pragma omp parallel for
-	for (int i0 = 0; i0 < r; i0 += 1) {
-#pragma omp parallel for
-	  for (int i1 = 0; i1 < c; i1 += 1) {
-		m2[i0][i1] = (m3[i0][i1] + m1[i0][i1]);
-	  }
-	}
-  }
+  for (int i0 = 0; i0 < r; i0 += 1) {
+    for (int i1 = 0; i1 < c; i1 += 1) {
+      m2[i0][i1] = (m0[i0][i1] + m1[i0][i1]);
+    }
+  }  
    *)
-  End test.
 
-  (* 这里说明 map 可以嵌套。但是有很大的优化空间，这也许是DPIA最有价值之处 *)
+  (* 这里说明 map 可以嵌套。但是有很大的优化空间，这也许是GenProg最有价值之处 *)
   Definition Madd_CG' (r c:nat) :=
     let dim_r : dim := dstr r "r" in
     let dim_c : dim := dstr c "c" in
@@ -1625,36 +1642,25 @@ Section Mmul.
    2. m1的一行与 m2' 的每一行做点积。使用 map (vdot ..)
    3. m1的每一行与 m2' 的每一行做点积。使用 map (map (vdot ...) ...)
    *)
-  Definition Mmul {r s c} (m1:exp (dmat r s dnum)) (m2:exp (dmat s c dnum))
+  Definition Mmul {r s c} (m0:exp (dmat r s dnum)) (m1:exp (dmat s c dnum))
     : exp (dmat r c dnum) :=
-    e_map (fun row1 => (e_map (fun col2 =>
-                                 Vdot row1 col2
-                          (* (e_reduce (e_op2 Rop2_add) col2 e_cnst0) *)
-                          (* e_cnst1 *)
-                          (* e_nth col2 (n2f 0) *)
-                          ) (Mtrans m2))) m1.
+    e_map (fun row1 => (e_map (fun col2 => Vdot row1 col2) (Mtrans m1))) m0.
 
   Definition Mmul_CG (r s c:nat) :=
     let dr : dim := dstr r "r" in
     let ds : dim := dstr s "s" in
     let dc : dim := dstr c "c" in
-    let m1 := env_new empty_env (dmat dr ds dnum) in
-    let m2 := env_new &m1 (dmat ds dc dnum) in
-    let m3 := env_new &m2 (dmat dr dc dnum) in
-    (* CG1 $m3 (Mmul (r:=dr)(s:=ds)(c:=dc) $m1 $m2). *)
-    CG $m3 (Mmul (r:=dr)(s:=ds)(c:=dc) $m1 $m2) &m3.
+    let m0 := env_new empty_env (dmat dr ds dnum) in
+    let m1 := env_new &m0 (dmat ds dc dnum) in
+    let m2 := env_new &m1 (dmat dr dc dnum) in
+    CG $m2 (Mmul (r:=dr)(s:=ds)(c:=dc) $m0 $m1) &m2.
 
-  Section test.
-    Variable r c s : nat.
-    Eval cbv in Mmul_CG r s c.
+  Eval cbv in Mmul_CG _ _ _.
   (* 
-#pragma omp parallel for
   for (int i0 = 0; i0 < r; i0 += 1) {
-#pragma omp parallel for
 	for (int i1 = 0; i1 < c; i1 += 1) {
 	  {
 		float v3[s];
-#pragma omp parallel for
 		for (int i2 = 0; i2 < s; i2 += 1) {
 		  v3[i2] = m0[i0][i2] * m1[i2][i1];
 		}
@@ -1670,7 +1676,6 @@ Section Mmul.
 	}
   }
    *)
-  End test.
 
   Section test.
     Let m00 : exp (dmat 2 3 dnum) :=
@@ -1738,7 +1743,7 @@ Section ex_OrienRepr.
          | 3 => q1.1*q2.4 + q1.2*q2.3 - q1.3*q2.2 + q1.4*q2.1
          | _ => e_cnst (mkRstring 0 "0")
          end).
-  
+
   Definition qmul_CG : string :=
     let q1 := env_new empty_env dnum in
     let q2 := env_new &q1 dnum in
@@ -1791,48 +1796,51 @@ v2[3] = ((((v0[0] * v1[3]) + (v0[1] * v1[2])) - (v0[2] * v1[1])) + (v0[3] * v1[0
     CG $m (Rx_mat $x) &m.
   Compute Rx_mat_CG.
 
-  (* 由欧拉角计算旋转矩阵（在B123方式下）*)
-  Definition B123mat (x1 x2 x3:exp dnum) : exp (dmat 3 3 dnum) :=
+  (* 由欧拉角计算旋转矩阵（在S123方式下）*)
+  Definition S123mat (x1 x2 x3:exp dnum) : exp (dmat 3 3 dnum) :=
     e_mkm
       (fun i j =>
          match fin2nat i, fin2nat j with
-         | 0, 0 => Cos x2*Cos x3
-         | 0, 1 => - Cos x2*Sin x3
-         | 0, 2 => Sin x2
-         | 1, 0 => Sin x1*Sin x2*Cos x3 + Sin x3*Cos x1
-         | 1, 1 => - Sin x1*Sin x2*Sin x3 + Cos x3*Cos x1
-         | 1, 2 => - Sin x1*Cos x2
-         | 2, 0 => - Cos x1*Sin x2*Cos x3 + Sin x3*Sin x1
-         | 2, 1 => Cos x1*Sin x2*Sin x3 + Cos x3*Sin x1
-         | 2, 2 => Cos x1*Cos x2
+         | 0, 0 => Cos x2 * Cos x3
+         | 0, 1 => Sin x1 * Sin x2 * Cos x3 - Cos x1  *  Sin x3
+         | 0, 2 => Cos x1 * Sin x2 * Cos x3 + Sin x1 * Sin x3
+         | 1, 0 => Cos x2 * Sin x3
+         | 1, 1 => Sin x1 * Sin x2 * Sin x3 + Cos x1 * Cos x3
+         | 1, 2 => Cos x1 * Sin x2 * Sin x3 + Cos x3 * Sin x1
+         | 2, 0 => - Sin x2
+         | 2, 1 => Sin x1 * Cos x2
+         | 2, 2 => Cos x1 * Cos x2
          | _, _ => e_cnst0
          end).
 
-  Definition B123mat_CG : string :=
+  Definition S123mat_CG : string :=
     let x1 := env_new empty_env dnum in
     let x2 := env_new &x1 dnum in
     let x3 := env_new &x2 dnum in
     let m := env_new &x3 (dmat 3 3 dnum) in
-    CG $m (B123mat $x1 $x2 $x3) &m.
+    CG $m (S123mat $x1 $x2 $x3) &m.
 
-  Compute B123mat_CG.
+  Compute S123mat_CG.
   (* 
-m0[0][0] = cos(x1) * cos(x2);
-m0[0][1] = -(cos(x1)) * sin(x2);
-m0[0][2] = sin(x1);
-m0[1][0] = sin(x0) * sin(x1) * cos(x2) + sin(x2) * cos(x0);
-m0[1][1] = -(sin(x0)) * sin(x1) * sin(x2) + cos(x2) * cos(x0);
-m0[1][2] = -(sin(x0)) * cos(x1);
-m0[2][0] = -(cos(x0)) * sin(x1) * cos(x2) + sin(x2) * sin(x0);
-m0[2][1] = cos(x0) * sin(x1) * sin(x2) + cos(x2) * sin(x0);
-m0[2][2] = cos(x0) * cos(x1);
+     m0[0][0] = cos(x1) * cos(x2);
+     m0[0][1] = (sin(x0) * sin(x1) * cos(x2) - cos(x0) * sin(x2));
+     m0[0][2] = (cos(x0) * sin(x1) * cos(x2) + sin(x0) * sin(x2));
+     m0[1][0] = cos(x1) * sin(x2);
+     m0[1][1] = (sin(x0) * sin(x1) * sin(x2) + cos(x0) * cos(x2));
+     m0[1][2] = (cos(x0) * sin(x1) * sin(x2) + cos(x2) * sin(x0));
+     m0[2][0] = -(sin(x1));
+     m0[2][1] = sin(x0) * cos(x1);
+     m0[2][2] = cos(x0) * cos(x1);
    *)
 
-  (* 我们知道 B123 x y z = Rx x * Ry y * Rz z，也就是说 B123mat 是可以通过符号化
-     算出来的。这个等式可以在Coq中进行验证，但是在DPIA的环境下，也许并不能得到很好的
+  (* 验证 S123mat 的语义？ *)
+  (* Lemma S123mat_spec : forall x y z, eeval (S123mat x y z) = .. *)
+
+  (* 我们知道 S123 x y z = Rz z * Ry y * Rx x，也就是说 S123mat 是可以通过符号化
+     算出来的。这个等式可以在Coq中进行验证，但是在GenProg的环境下，也许并不能得到很好的
      代码。我们来做一个实验。*)
   Definition B123mat_equiv (x1 x2 x3:exp dnum) : exp (dmat 3 3 dnum) :=
-    Mmul (Mmul (Rx_mat x1) (Ry_mat x2)) (Rz_mat x3).
+    Mmul (Mmul  (Rz_mat x3) (Ry_mat x2)) (Rx_mat x1).
   Definition B123mat_equiv_CG : string :=
     let x1 := env_new empty_env dnum in
     let x2 := env_new &x1 dnum in
@@ -1844,8 +1852,8 @@ m0[2][2] = cos(x0) * cos(x1);
   (* 从结果来看，矩阵乘法中的 mkv算子尚未彻底展开，这是mkv和mkm原语尚未处理妥当。
      不过，从运行效率来看，我们也许要使用一个化简的结果来编程。*)
 
-  (* 由旋转矩阵计算欧拉角（在B123方式下，小机动范围内的算法）*)
-  Definition B123_euler_algSmall (m:exp (dmat 3 3 dnum)) : exp (dary 3 dnum) :=
+  (* 由旋转矩阵计算欧拉角（在S123方式下，小机动范围内的算法）*)
+  Definition S123_euler_algSmall (m:exp (dmat 3 3 dnum)) : exp (dary 3 dnum) :=
     e_mkv
       (fun i =>
          match fin2nat i with
@@ -1854,19 +1862,19 @@ m0[2][2] = cos(x0) * cos(x1);
          | 2 => Atan (- (m.1.2 / m.1.1))
          | _ => e_cnst0
          end).
-  Definition B123_euler_algSmall_CG : string :=
+  Definition S123_euler_algSmall_CG : string :=
     let m := env_new empty_env (dmat 3 3 dnum) in
     let v := env_new &m (dary 3 dnum) in
-    CG $v (B123_euler_algSmall $m) &v.
-  Compute B123_euler_algSmall_CG.
+    CG $v (S123_euler_algSmall $m) &v.
+  Compute S123_euler_algSmall_CG.
   (* 
 v1[0] = atan(-(m0[1][2]) / m0[2][2]);
 v1[1] = asin(m0[0][2]);
 v1[2] = atan(-(m0[0][1] / m0[0][0]));
    *)
 
-  (* 由旋转矩阵计算欧拉角（在B123方式下，大机动范围内的算法）*)
-  Definition B123_euler_algBig (m:exp (dmat 3 3 dnum)) : exp (dary 3 dnum) :=
+  (* 由旋转矩阵计算欧拉角（在S123方式下，大机动范围内的算法）*)
+  Definition S123_euler_algBig (m:exp (dmat 3 3 dnum)) : exp (dary 3 dnum) :=
     e_mkv
       (fun i =>
          match fin2nat i with
@@ -1875,11 +1883,11 @@ v1[2] = atan(-(m0[0][1] / m0[0][0]));
          | 2 => Atan2 (-m.1.2, m.1.1)
          | _ => e_cnst0
          end).
-  Definition B123_euler_algBig_CG : string :=
+  Definition S123_euler_algBig_CG : string :=
     let m := env_new empty_env (dmat 3 3 dnum) in
     let v := env_new &m (dary 3 dnum) in
-    CG $v (B123_euler_algBig $m) &v.
-  Compute B123_euler_algBig_CG.
+    CG $v (S123_euler_algBig $m) &v.
+  Compute S123_euler_algBig_CG.
   (* 
 v1[0] = atan2(-(m0[1][2]), m0[2][2]);
 v1[1] = asin(m0[0][2]);
@@ -2063,8 +2071,8 @@ Section test.
    *)
   Variable x0 : R.
   Variable n0 : nat.
+  Let n : dim := dstr n0 "n".
   Variable v0 v1 : vec R n0.
-  Definition n : dim := dstr n0 "n".
   Let data_arr : data := dary n dnum.
   Let cfun1 : cfun :=
         cfun_mk
