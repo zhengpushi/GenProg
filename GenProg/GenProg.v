@@ -10,6 +10,7 @@
  *)
 
 (* Require Import Extraction. *)
+From OrienRepr Require Import RotationMatrix3D EulerAngle Quaternion.
 Require Import Utils.
 
 Declare Scope CG_scope.
@@ -1733,7 +1734,7 @@ End ex_mkv.
 Section ex_OrienRepr.
 
   (* 四元数乘法 *)
-  Definition qmul (q1 q2:exp (dary 4 dnum)) : exp (dary 4 dnum) :=
+  Definition Qmul (q1 q2:exp (dary 4 dnum)) : exp (dary 4 dnum) :=
     e_mkv
       (fun i =>
          match fin2nat i with
@@ -1744,13 +1745,23 @@ Section ex_OrienRepr.
          | _ => e_cnst (mkRstring 0 "0")
          end).
 
-  Definition qmul_CG : string :=
+  (* 语义验证 *)
+  Lemma Qmul_spec : forall q1 q2 eta,
+      eeval (Qmul q1 q2) eta = qmul (eeval q1 eta) (eeval q2 eta).
+  Proof.
+    intros. simpl. apply veq_iff_vnth; intros. destruct i.
+    repeat (destruct i;
+            [cbn; remember (eeval q1 eta); cbv [value dim2nat] in v; v2e v; ra|
+              try lia]).
+  Qed.
+      
+  Definition Qmul_CG : string :=
     let q1 := env_new empty_env dnum in
     let q2 := env_new &q1 dnum in
     let q3 := env_new &q2 dnum in
-    CG $q3 (qmul $q1 $q2) &q3.
+    CG $q3 (Qmul $q1 $q2) &q3.
 
-  Compute qmul_CG.
+  Compute Qmul_CG.
   (* 
 v2[0] = ((((v0[0] * v1[0]) - (v0[1] * v1[1])) - (v0[2] * v1[2])) - (v0[3] * v1[3]));
 v2[1] = ((((v0[0] * v1[1]) + (v0[1] * v1[0])) + (v0[2] * v1[3])) - (v0[3] * v1[2]));
@@ -1796,47 +1807,57 @@ v2[3] = ((((v0[0] * v1[3]) + (v0[1] * v1[2])) - (v0[2] * v1[1])) + (v0[3] * v1[0
     CG $m (Rx_mat $x) &m.
   Compute Rx_mat_CG.
 
-  (* 由欧拉角计算旋转矩阵（在S123方式下）*)
-  Definition S123mat (x1 x2 x3:exp dnum) : exp (dmat 3 3 dnum) :=
+  (* 由欧拉角计算旋转矩阵（在E123方式下）*)
+  Definition E123mat (x1 x2 x3:exp dnum) : exp (dmat 3 3 dnum) :=
     e_mkm
       (fun i j =>
          match fin2nat i, fin2nat j with
          | 0, 0 => Cos x2 * Cos x3
-         | 0, 1 => Sin x1 * Sin x2 * Cos x3 - Cos x1  *  Sin x3
+         | 0, 1 => Sin x1 * Sin x2 * Cos x3 - Cos x1 * Sin x3
          | 0, 2 => Cos x1 * Sin x2 * Cos x3 + Sin x1 * Sin x3
          | 1, 0 => Cos x2 * Sin x3
          | 1, 1 => Sin x1 * Sin x2 * Sin x3 + Cos x1 * Cos x3
-         | 1, 2 => Cos x1 * Sin x2 * Sin x3 + Cos x3 * Sin x1
+         | 1, 2 => Cos x1 * Sin x2 * Sin x3 - Cos x3 * Sin x1
          | 2, 0 => - Sin x2
          | 2, 1 => Sin x1 * Cos x2
          | 2, 2 => Cos x1 * Cos x2
          | _, _ => e_cnst0
          end).
 
-  Definition S123mat_CG : string :=
+  Definition E123mat_CG : string :=
     let x1 := env_new empty_env dnum in
     let x2 := env_new &x1 dnum in
     let x3 := env_new &x2 dnum in
     let m := env_new &x3 (dmat 3 3 dnum) in
-    CG $m (S123mat $x1 $x2 $x3) &m.
+    CG $m (E123mat $x1 $x2 $x3) &m.
 
-  Compute S123mat_CG.
+  Compute E123mat_CG.
   (* 
      m0[0][0] = cos(x1) * cos(x2);
      m0[0][1] = (sin(x0) * sin(x1) * cos(x2) - cos(x0) * sin(x2));
      m0[0][2] = (cos(x0) * sin(x1) * cos(x2) + sin(x0) * sin(x2));
      m0[1][0] = cos(x1) * sin(x2);
      m0[1][1] = (sin(x0) * sin(x1) * sin(x2) + cos(x0) * cos(x2));
-     m0[1][2] = (cos(x0) * sin(x1) * sin(x2) + cos(x2) * sin(x0));
+     m0[1][2] = (cos(x0) * sin(x1) * sin(x2) - cos(x2) * sin(x0));
      m0[2][0] = -(sin(x1));
      m0[2][1] = sin(x0) * cos(x1);
      m0[2][2] = cos(x0) * cos(x1);
    *)
 
-  (* 验证 S123mat 的语义？ *)
-  (* Lemma S123mat_spec : forall x y z, eeval (S123mat x y z) = .. *)
+  (* 验证 E123mat 的语义，即 *)
+  Lemma E123mat_spec : forall x y z eta,
+      eeval (E123mat x y z) eta =
+        E123 (eeval x eta) (eeval y eta) (eeval z eta).
+  Proof.
+    intros. simpl. unfold mmake.
+    apply meq_iff_mnth. intros. destruct i, j. simpl. fin.
+    repeat (destruct i;
+            [repeat (destruct i0; simpl;
+                     [remember (eeval x eta); remember (eeval y eta);
+                      remember (eeval z eta); cbv; ra| try lia])| try lia]).
+  Qed.
 
-  (* 我们知道 S123 x y z = Rz z * Ry y * Rx x，也就是说 S123mat 是可以通过符号化
+  (* 我们知道 E123 x y z = Rz z * Ry y * Rx x，也就是说 E123mat 是可以通过符号化
      算出来的。这个等式可以在Coq中进行验证，但是在GenProg的环境下，也许并不能得到很好的
      代码。我们来做一个实验。*)
   Definition B123mat_equiv (x1 x2 x3:exp dnum) : exp (dmat 3 3 dnum) :=
@@ -1852,8 +1873,8 @@ v2[3] = ((((v0[0] * v1[3]) + (v0[1] * v1[2])) - (v0[2] * v1[1])) + (v0[3] * v1[0
   (* 从结果来看，矩阵乘法中的 mkv算子尚未彻底展开，这是mkv和mkm原语尚未处理妥当。
      不过，从运行效率来看，我们也许要使用一个化简的结果来编程。*)
 
-  (* 由旋转矩阵计算欧拉角（在S123方式下，小机动范围内的算法）*)
-  Definition S123_euler_algSmall (m:exp (dmat 3 3 dnum)) : exp (dary 3 dnum) :=
+  (* 由旋转矩阵计算欧拉角（在E123方式下，小机动范围内的算法）*)
+  Definition E123_euler_algSmall (m:exp (dmat 3 3 dnum)) : exp (dary 3 dnum) :=
     e_mkv
       (fun i =>
          match fin2nat i with
@@ -1862,19 +1883,19 @@ v2[3] = ((((v0[0] * v1[3]) + (v0[1] * v1[2])) - (v0[2] * v1[1])) + (v0[3] * v1[0
          | 2 => Atan (- (m.1.2 / m.1.1))
          | _ => e_cnst0
          end).
-  Definition S123_euler_algSmall_CG : string :=
+  Definition E123_euler_algSmall_CG : string :=
     let m := env_new empty_env (dmat 3 3 dnum) in
     let v := env_new &m (dary 3 dnum) in
-    CG $v (S123_euler_algSmall $m) &v.
-  Compute S123_euler_algSmall_CG.
+    CG $v (E123_euler_algSmall $m) &v.
+  Compute E123_euler_algSmall_CG.
   (* 
 v1[0] = atan(-(m0[1][2]) / m0[2][2]);
 v1[1] = asin(m0[0][2]);
 v1[2] = atan(-(m0[0][1] / m0[0][0]));
    *)
 
-  (* 由旋转矩阵计算欧拉角（在S123方式下，大机动范围内的算法）*)
-  Definition S123_euler_algBig (m:exp (dmat 3 3 dnum)) : exp (dary 3 dnum) :=
+  (* 由旋转矩阵计算欧拉角（在E123方式下，大机动范围内的算法）*)
+  Definition E123_euler_algBig (m:exp (dmat 3 3 dnum)) : exp (dary 3 dnum) :=
     e_mkv
       (fun i =>
          match fin2nat i with
@@ -1883,11 +1904,11 @@ v1[2] = atan(-(m0[0][1] / m0[0][0]));
          | 2 => Atan2 (-m.1.2, m.1.1)
          | _ => e_cnst0
          end).
-  Definition S123_euler_algBig_CG : string :=
+  Definition E123_euler_algBig_CG : string :=
     let m := env_new empty_env (dmat 3 3 dnum) in
     let v := env_new &m (dary 3 dnum) in
-    CG $v (S123_euler_algBig $m) &v.
-  Compute S123_euler_algBig_CG.
+    CG $v (E123_euler_algBig $m) &v.
+  Compute E123_euler_algBig_CG.
   (* 
 v1[0] = atan2(-(m0[1][2]), m0[2][2]);
 v1[1] = asin(m0[0][2]);
