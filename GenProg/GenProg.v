@@ -843,7 +843,7 @@ Section build_Atrans.
     - (* e_mkm *)
       apply (mkm2comm a f Ctrans (dim2nat r) (dim2nat c)).
     - (* e_nth *)
-      apply (assign a (e_nth e i)).
+      apply (Ctrans _ e (fun x => assign a (e_nth x i))).
     - (* e_zip *)
       apply (c_seq (AtransM _ (a_vfst a) e1) (AtransM _ (a_vsnd a) e2)).
     (* Check c_mapI. *)
@@ -900,11 +900,13 @@ Section build_Ctrans.
     - (* e_idx *)
       apply (CtransM _ e1 (fun x => C (e_idx x e2))).
     - (* e_mkv *)
-      apply (C (e_mkv f)).
+      apply (c_new (fun (a1:acc (dary n d)) (e1:exp (dary n d)) =>
+                      c_seq (Atrans _ a1 (e_mkv f)) (C e1))).
     - (* e_mkm *)
-      apply (C (e_mkm f)).
+      apply (c_new (fun (a1:acc (dmat r c d)) (e1:exp (dmat r c d)) =>
+                      c_seq (Atrans _ a1 (e_mkm f)) (C e1))).
     - (* e_nth *)
-      apply (C (e_nth e i)).
+      apply (CtransM _ e (fun x => C (e_nth x i))).
     - (* e_zip *)
       apply (CtransM _ e1 (fun x => CtransM _ e2 (fun y => C (e_zip x y)))).
     - (* e_pair *)
@@ -914,7 +916,7 @@ Section build_Ctrans.
     - (* e_snd *)
       apply (CtransM _ e (fun x => C (e_snd x))).
     - (* e_trans *)
-      apply (C (e_trans e)).
+      apply (CtransM _ e (fun x => C (e_trans x))).
   Defined.
 
 End build_Ctrans.
@@ -1018,8 +1020,8 @@ Fixpoint HItrans (c : comm) : comm :=
                c_seq
                  (assign a1 e0)
                  (c_seq
-                    (c_for (fun i => f (e_idx ev i) e1 a1))
-                    (C e1)))
+                    (c_for (fun i => HItrans (f (e_idx ev i) e1 a1)))
+                    (HItrans (C e1))))
   end.
 
 (** *** Stage III: For-loops to Parallel Pseudo-C  *)
@@ -1685,7 +1687,7 @@ Section Mmul.
           Mmake (fun i j => (e_cnst i) * (e_cnst j)). (* [[0,0];[0,1];[0,2]] *)
     Let m1 : exp (dmat 2 2 dnum) :=
           Mmul m00 m01. (* [[0,5];[0,8]] *)
-    
+
     Let m1_value : mat R 2 2 :=
           f2m
             (fun i j => match i, j with
@@ -1999,7 +2001,7 @@ Section cfun.
 
   (* 由参数生成字符串 *)
   Definition str_params (eta:env) : string :=
-    concat "; " (map
+    concat ", " (map
                    (fun i => data2strDecl (item2data (snd (snd i))) (fst (snd i)))
                    (rev eta)).
 
@@ -2069,7 +2071,7 @@ Section test.
 
   Compute cfun_CG cfun1.
   (* 
-     float arith1(float x0; float x1; float x2) {
+     float arith1(float x0, float x1, float x2) {
         float x3;
         x3 = x0 + x1 + sin(x2);
         return x3;
@@ -2109,7 +2111,7 @@ Section test.
   Compute cfun_HItrans cfun1.
   Compute cfun_CG cfun1.
   (* 
-     void cmult(float x0; float v0[n]; float v1[n]) {
+     void cmult(float x0, float v0[n], float v1[n]) {
        for (int i0 = 0; i0 < n; i0 += 1) {
          v1[i0] = x0 * v0[i0];
        }
